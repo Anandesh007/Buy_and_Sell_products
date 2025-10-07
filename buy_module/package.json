@@ -1,7 +1,7 @@
 {
-  "name": "buyandsell",
+  "name": "buy_module",
   "version": "0.0.1",
-  "description": "buyandsell",
+  "description": "buy_module",
   "keywords": [
     "loopback-application",
     "loopback"
@@ -25,8 +25,8 @@
     "test": "lb-mocha --allow-console-logs \"dist/__tests__\"",
     "posttest": "npm run lint",
     "test:dev": "lb-mocha --allow-console-logs dist/__tests__/**/*.js && npm run posttest",
-    "docker:build": "docker build -t buyandsell .",
-    "docker:run": "docker run -p 3000:3000 -d buyandsell",
+    "docker:build": "docker build -t buy_module .",
+    "docker:run": "docker run -p 3000:3000 -d buy_module",
     "premigrate": "npm run build",
     "migrate": "node ./dist/migrate",
     "preopenapi-spec": "npm run build",
@@ -56,7 +56,6 @@
     "@loopback/rest-explorer": "^8.0.5",
     "@loopback/service-proxy": "^8.0.4",
     "loopback-connector-postgresql": "^7.2.3",
-    "sudo": "^1.0.3",
     "tslib": "^2.0.0"
   },
   "devDependencies": {
