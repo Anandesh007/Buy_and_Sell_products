@@ -1,5 +1,5 @@
-**Creation of user and selling module
-**
+**Creation of user and selling module**
+
 1.User module
 
 a.Database name: buyandsell
