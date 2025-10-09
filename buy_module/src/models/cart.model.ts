@@ -22,8 +22,9 @@ export class Cart extends Entity {
   status: string;
 
   @property({
-    type: 'string',
+    type: 'date',
     required: true,
+    defaultFn:'now'
   })
   created_at: string;
 
