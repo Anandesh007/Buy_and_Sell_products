@@ -1,9 +1,11 @@
 import {repository} from '@loopback/repository';
-import {post, get, param, response} from '@loopback/rest';
-import {CartRepository, CartitemRepository, ProductRepository, BillingRepository, BillingitemRepository} from '../repositories';
+import {post, get, param, response, requestBody,HttpErrors} from '@loopback/rest';
+import {CartRepository, CartitemRepository, ProductRepository, BillingRepository, BillingitemRepository, UserRepository} from '../repositories';
 import {Billing, Billingitem} from '../models';
 import * as fs from 'fs';
 import * as path from 'path';
+import PDFDocument from 'pdfkit';
+import { Headers } from 'node-fetch';
 
 export class BillingController {
   constructor(
@@ -12,6 +14,7 @@ export class BillingController {
     @repository(ProductRepository) private productRepo: ProductRepository,
     @repository(BillingRepository) private billingRepo: BillingRepository,
     @repository(BillingitemRepository) private billingItemRepo: BillingitemRepository,
+    @repository(UserRepository) private userRepo: UserRepository
   ) {}
 
   // 1. Checkout Cart & Generate Billing
@@ -79,5 +82,171 @@ export class BillingController {
     fs.writeFileSync(filePath, csvData);
 
     return csvData; // Directly returning as response for simplicity
+  }
+
+  @post('/billing/report')
+  @response(200, {
+    description: 'Transaction PDF Report Generated',
+    content: {'application/pdf': {schema: {type: 'string', format: 'binary'}}},
+  })
+  async generateReport(
+    @requestBody() payload: {start_time: string; end_time: string},
+  ) {
+    try {
+      const {start_time, end_time} = payload;
+      const start = new Date(start_time);
+      const end = new Date(end_time);
+
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        throw new HttpErrors.BadRequest('Invalid date format');
+      }
+
+      // 1️⃣ Get all billings between given time range
+      const billings = await this.billingRepo.find({
+        where: {
+          and: [
+            {created_at: {gte: start.toISOString()}},
+            {created_at: {lte: end.toISOString()}},
+          ],
+        },
+      });
+
+      if (billings.length === 0) {
+        throw new HttpErrors.NotFound('No transactions found in the given range');
+      }
+
+      // 2️⃣ Create report folder
+      const reportsDir = path.join(__dirname, '../../../Reports');
+      if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir);
+
+      const reportPath = path.join(
+        reportsDir,
+        `transaction_report_${Date.now()}.pdf`,
+      );
+
+      // 3️⃣ Initialize PDF
+      const doc = new PDFDocument({margin: 40});
+      const stream = fs.createWriteStream(reportPath);
+      doc.pipe(stream);
+
+      doc.fontSize(18).text('Transaction Summary Report', {align: 'center'});
+      doc.moveDown();
+      doc.fontSize(12).text(`From: ${start_time}`);
+      doc.text(`To:   ${end_time}`);
+      doc.moveDown();
+
+      doc.fontSize(14).text('Transaction Details:', {underline: true});
+      doc.moveDown(0.5);
+
+      // 4️⃣ Loop through all billing records
+      for (const billing of billings) {
+        const billingItems = await this.billingItemRepo.find({
+          where: {billing_id: billing.id},
+        });
+
+        // Use first product to identify seller
+        let sellerId = 'Unknown';
+        if (billingItems.length > 0) {
+          const firstProd = await this.productRepo.findById(
+            billingItems[0].product_id,
+          );
+          sellerId = firstProd.seller_id.toString();
+        }
+
+        doc.fontSize(11).text(
+          `Billing ID: ${billing.id} | Buyer ID: ${billing.buyer_id} | Seller ID: ${sellerId},Products: ${billingItems.length} | Total: ₹${billing.total_amount} | Date: ${billing.created_at}`
+        );
+  
+        doc.moveDown(0.5);
+      }
+
+      doc.end();
+      await new Promise(resolve => stream.on('finish', resolve));
+
+      return {
+        message: 'Transaction report generated successfully',
+        filePath: reportPath,
+      };
+    } catch (error) {
+      console.error('Error generating report:', error);
+      throw new HttpErrors.InternalServerError('Failed to generate transaction report');
+    }
+  }
+  @get('/report/pdf')
+  @response(200, {
+    description: 'PDF Transaction Report',
+    content: {'application/pdf': {schema: {type: 'string', format: 'binary'}}},
+  })
+  async generatedReport(
+    @requestBody() payload: {start_time: string; end_time: string}
+  ) {
+    const startDate = new Date(payload.start_time);
+    const endDate = new Date(payload.end_time);
+
+    // 1. Fetch billing records within time range
+    const billings = await this.billingRepo.find({
+      where: {
+        created_at: {
+          between: [startDate.toISOString(), endDate.toISOString()],
+        },
+      },
+    });
+
+    // 2. Prepare PDF document
+    const pdfPath = path.join(__dirname, `../../../Reports/transaction_report_${Date.now()}.pdf`);
+    const doc = new PDFDocument({margin: 40});
+    const writeStream = fs.createWriteStream(pdfPath);
+    doc.pipe(writeStream);
+
+    // 3. PDF Header
+    doc.fontSize(18).text('Transaction Report', {align: 'center'});
+    doc.moveDown(0.5);
+    doc.fontSize(12).text(`From: ${startDate.toLocaleString()}`, {align: 'center'});
+    doc.text(`To: ${endDate.toLocaleString()}`, {align: 'center'});
+    
+    const header=100;
+    // 4. Table Headers
+    doc.font('Helvetica-Bold');
+    doc.fontSize(12).text('ID', 50,header);
+    doc.text('Buyer ID', 90,header);
+    doc.text('Invoice No', 200,header);
+    doc.text('Total Cost', 400,header);
+    doc.text('Date/Time', 500,header);
+    doc.moveDown(0.5);
+    doc.moveTo(40, doc.y).lineTo(550, doc.y).stroke();
+    doc.moveDown(0.5);
+    doc.font('Helvetica');
+    console.log(billings);
+    
+    const row=50;
+    let value_header=125;
+    // 5. Fill Table Rows
+    for (const billing of billings) {
+      const items = await this.billingItemRepo.find({where: {billing_id: billing.id}});
+      const buyer = await this.userRepo.findById(billing.buyer_id);
+      const totalCost = items.reduce((sum, i) => sum + Number(i.total_price || 0), 0);
+      const dateValue = `${billing.billing_date}`.slice(0,25); // This is the string from your table
+
+
+      doc.text(`${billing.id}`, 50,value_header);
+      doc.text(buyer.name || '-', 90,value_header);
+      doc.text(billing.invoice_number || '-', 200,value_header);
+      doc.text(totalCost.toFixed(2), 400,value_header);
+      doc.text(dateValue, 500,value_header);
+      value_header+=row;
+    }
+
+    doc.moveDown(1);
+    doc.font('Helvetica-Bold').text('End of Report', {align: 'center'});
+
+    // 6. Finalize PDF
+    doc.end();
+
+    return new Promise((resolve, reject) => {
+      writeStream.on('finish', () => {
+        resolve(fs.readFileSync(pdfPath));
+      });
+      writeStream.on('error', reject);
+    });
   }
 }

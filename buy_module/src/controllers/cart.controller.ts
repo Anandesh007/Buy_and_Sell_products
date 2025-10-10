@@ -1,5 +1,5 @@
-import {repository} from '@loopback/repository';
-import {post, get, param, requestBody} from '@loopback/rest';
+import {repository,} from '@loopback/repository';
+import {post, get, param, requestBody, HttpErrors} from '@loopback/rest';
 import {CartRepository, CartitemRepository, ProductRepository} from '../repositories';
 
 export class CartController {
@@ -27,6 +27,8 @@ export class CartController {
     @requestBody() payload: {product_id: number; quantity: number},
   ) {
     const product = await this.productRepo.findById(payload.product_id);
+    const query = await this.cartRepo.findById(cartId);
+    if(query.status=='CHECKED_OUT') new HttpErrors.InternalServerError('Cart is checkedout');
     if (product.stock < payload.quantity) {
       throw new Error('Insufficient stock');
     }
