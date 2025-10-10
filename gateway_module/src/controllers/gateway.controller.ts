@@ -140,7 +140,7 @@ export class GatewayController {
     }
   }
 
-  // 🧾 BILLING MODULE
+  // BILLING MODULE
   @post('/billing/{cartId}')
   async generateBill(@param.path.number('cartId') cartId: number) {
     try {
